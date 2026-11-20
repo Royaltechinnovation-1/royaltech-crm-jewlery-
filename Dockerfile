@@ -1,20 +1,23 @@
-FROM dunglas/frankenphp:1-php8.4-bookworm
+FROM php:8.4-apache-bookworm
 
-RUN install-php-extensions \
-    pdo_sqlite \
-    sqlite3 \
-    mbstring \
-    openssl \
-    tokenizer \
-    xml \
-    ctype \
-    json \
-    bcmath \
-    fileinfo \
-    zip \
-    intl
+RUN apt-get update && apt-get install -y \
+    git unzip curl libzip-dev libsqlite3-dev libpng-dev libonig-dev \
+    && docker-php-ext-install pdo_sqlite zip bcmath \
+    && a2enmod rewrite headers \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# Apache: Laravel public folder + PORT support for Render
+ENV APACHE_DOCUMENT_ROOT=/app/public
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf \
+    && sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf \
+    && printf '%s\n' \
+      '<Directory /app/public>' \
+      '    AllowOverride All' \
+      '    Require all granted' \
+      '</Directory>' \
+      >> /etc/apache2/apache2.conf
 
 WORKDIR /app
 
@@ -27,11 +30,13 @@ RUN composer install \
     --prefer-dist \
     --optimize-autoloader
 
-COPY package.json package-lock.json ./
+# Node for Vite build
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
-    && npm ci \
     && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 
@@ -39,13 +44,13 @@ RUN npm run build \
     && composer dump-autoload --no-dev --optimize \
     && mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache database \
     && chmod -R 775 storage bootstrap/cache database \
-    && chown -R www-data:www-data storage bootstrap/cache database
+    && chown -R www-data:www-data /app
 
-COPY docker/Caddyfile /etc/caddy/Caddyfile
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh \
+    && sed -i 's/\r$//' /entrypoint.sh
 
-ENV PORT=8000 \
+ENV PORT=10000 \
     APP_ENV=production \
     APP_DEBUG=false \
     LOG_CHANNEL=stderr \
@@ -55,5 +60,5 @@ ENV PORT=8000 \
     DB_CONNECTION=sqlite \
     DB_DATABASE=/app/database/database.sqlite
 
-EXPOSE 8000
+EXPOSE 10000
 ENTRYPOINT ["/entrypoint.sh"]
