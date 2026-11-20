@@ -22,5 +22,6 @@ php artisan migrate --force
 php artisan db:seed --force || true
 php artisan config:clear || true
 php artisan view:clear || true
+php artisan route:clear || true
 
 exec apache2-foreground
